@@ -26,6 +26,36 @@ def sanitize_sid(sid):
         return ""
     return re.sub(r"[^a-zA-Z0-9_\-]", "", str(sid))[:32]
 
+def ensure_wine_configured():
+    wine_c = "/root/.wine/drive_c"
+    prog_files = os.path.join(wine_c, "Program Files (x86)")
+    jhora_dest = os.path.join(prog_files, "Jagannatha Hora")
+    try:
+        os.makedirs(prog_files, exist_ok=True)
+        if not os.path.exists(jhora_dest):
+            try:
+                os.symlink(JHORA_DIR, jhora_dest)
+            except Exception:
+                shutil.copytree(JHORA_DIR, jhora_dest, symlinks=True, dirs_exist_ok=True)
+    except Exception as e:
+        print("ensure_wine_configured prog_files note:", e)
+
+    # Seed diamond chart preferences to Wine AppData paths
+    appdata_dirs = [
+        os.path.join(wine_c, "users", "root", "AppData", "Local", "JagannathaHora"),
+        os.path.join(wine_c, "users", "root", "AppData", "Local", "JagannathaHora", "jhcore"),
+        os.path.join(wine_c, "users", "root", "Local Settings", "Application Data", "JagannathaHora"),
+        os.path.join(wine_c, "users", "root", "Local Settings", "Application Data", "JagannathaHora", "jhcore")
+    ]
+    src_ini = os.path.join(JHORA_DIR, "jhora.ini")
+    for d in appdata_dirs:
+        try:
+            os.makedirs(d, exist_ok=True)
+            dst_ini = os.path.join(d, "jhora.ini")
+            shutil.copy2(src_ini, dst_ini)
+        except Exception:
+            pass
+
 def get_or_create_session(sid):
     global next_display
     sid = sanitize_sid(sid) or str(uuid.uuid4())[:8]
@@ -72,6 +102,7 @@ def get_or_create_session(sid):
     time.sleep(0.5)
 
     # 3. Start JHora under Wine
+    ensure_wine_configured()
     jhora_log = open(os.path.join(user_dir, "jhora.log"), "w")
     jhora_exe = os.path.join(JHORA_DIR, "jhora.exe")
     p_jhora = subprocess.Popen(["wine", jhora_exe], cwd=JHORA_DIR, env=env, stdout=jhora_log, stderr=subprocess.STDOUT)
@@ -310,12 +341,13 @@ def create_app():
     app.router.add_static("/static/", STATIC_DIR)
     return app
 
-def prewarm_wine():
+def setup_and_prewarm_wine():
     try:
         print("Pre-warming Wine prefix in background...")
         sys.stdout.flush()
         subprocess.run(["wineboot", "-i"], timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print("Wine prefix ready!")
+        ensure_wine_configured()
+        print("Wine prefix and Jagannatha Hora environment ready!")
         sys.stdout.flush()
     except Exception as e:
         print("Pre-warm note:", e)
@@ -323,7 +355,7 @@ def prewarm_wine():
 if __name__ == "__main__":
     os.makedirs(SESSIONS_DIR, exist_ok=True)
     os.makedirs(STATIC_DIR, exist_ok=True)
-    threading.Thread(target=prewarm_wine, daemon=True).start()
+    threading.Thread(target=setup_and_prewarm_wine, daemon=True).start()
     print("=================================================================")
     print(f"Jagannatha Hora Multi-User Gateway starting on port {PORT}...")
     print("=================================================================")
