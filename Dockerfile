@@ -9,7 +9,6 @@ RUN dpkg --add-architecture i386 && \
     apt-get install -y --no-install-recommends \
         wine32 \
         xvfb \
-        openbox \
         x11vnc \
         novnc \
         websockify \
@@ -23,14 +22,11 @@ RUN dpkg --add-architecture i386 && \
         curl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -u 1000 user
-USER user
-ENV HOME=/home/user
-ENV PATH=/home/user/.local/bin:$PATH
+RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
 WORKDIR /app
 
-COPY --chown=user:user app /app
+COPY app /app
 
 EXPOSE 7860
 

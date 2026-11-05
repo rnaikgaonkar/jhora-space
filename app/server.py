@@ -6,8 +6,7 @@ import uuid
 import time
 import shutil
 import subprocess
-import json
-import mimetypes
+import traceback
 from aiohttp import web, WSMsgType
 import aiohttp
 
@@ -18,18 +17,6 @@ SESSIONS_DIR = os.path.join("/tmp", "jhora_sessions")
 JHORA_DIR = os.path.join(BASE_DIR, "jhora")
 
 sessions = {}
-# session structure:
-# {
-#   "sid": "...",
-#   "display": 100,
-#   "vnc_port": 6000,
-#   "ws_port": 6100,
-#   "user_dir": "...",
-#   "charts_dir": "...",
-#   "procs": [...],
-#   "last_active": timestamp
-# }
-
 next_display = 100
 
 def get_or_create_session(sid):
@@ -67,29 +54,24 @@ def get_or_create_session(sid):
     procs = []
 
     # 1. Start Xvfb (Virtual Framebuffer Display)
-    xvfb_cmd = ["Xvfb", f":{disp}", "-screen", "0", "1280x800x24", "+extension", "RANDR", "-noreset"]
+    xvfb_cmd = ["Xvfb", f":{disp}", "-screen", "0", "1280x800x24", "-ac", "+extension", "RANDR"]
     p_xvfb = subprocess.Popen(xvfb_cmd, env=env)
     procs.append(p_xvfb)
     time.sleep(0.5)
 
-    # 2. Start Openbox (lightweight window manager)
-    p_ob = subprocess.Popen(["openbox"], env=env)
-    procs.append(p_ob)
-
-    # 3. Start x11vnc
+    # 2. Start x11vnc
     x11vnc_cmd = ["x11vnc", "-display", f":{disp}", "-rfbport", str(vnc_p), "-forever", "-shared", "-nopw", "-quiet"]
     p_vnc = subprocess.Popen(x11vnc_cmd, env=env)
     procs.append(p_vnc)
     time.sleep(0.3)
 
-    # 4. Start websockify for this session
-    websockify_cmd = ["websockify", "--web=/usr/share/novnc", str(ws_p), f"127.0.0.1:{vnc_p}"]
+    # 3. Start websockify for this session
+    websockify_cmd = ["websockify", str(ws_p), f"127.0.0.1:{vnc_p}"]
     p_ws = subprocess.Popen(websockify_cmd)
     procs.append(p_ws)
     time.sleep(0.3)
 
-    # 5. Start JHora under Wine
-    # Create symlink from Z: to charts_dir for convenient opening
+    # 4. Start JHora under Wine
     jhora_exe = os.path.join(JHORA_DIR, "jhora.exe")
     p_jhora = subprocess.Popen(["wine", jhora_exe], cwd=JHORA_DIR, env=env)
     procs.append(p_jhora)
@@ -106,60 +88,73 @@ def get_or_create_session(sid):
     }
     sessions[sid] = sess
     print(f"Created isolated session {sid} on DISPLAY :{disp} (VNC {vnc_p}, WS {ws_p})")
+    sys.stdout.flush()
     return sess
 
 async def index_handler(request):
-    sid = request.cookies.get("jhora_sid")
-    if not sid or sid not in sessions:
-        sid = str(uuid.uuid4())[:8]
-    
-    get_or_create_session(sid)
+    try:
+        sid = request.cookies.get("jhora_sid")
+        if not sid or sid not in sessions:
+            sid = str(uuid.uuid4())[:8]
+        
+        get_or_create_session(sid)
 
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    with open(index_path, "r", encoding="utf-8") as f:
-        html = f.read()
+        index_path = os.path.join(STATIC_DIR, "index.html")
+        with open(index_path, "r", encoding="utf-8") as f:
+            html = f.read()
 
-    response = web.Response(text=html, content_type="text/html")
-    response.set_cookie("jhora_sid", sid, max_age=86400 * 30, path="/")
-    return response
+        response = web.Response(text=html, content_type="text/html")
+        response.set_cookie("jhora_sid", sid, max_age=86400 * 30, path="/")
+        return response
+    except Exception as e:
+        tb = traceback.format_exc()
+        print("ERROR IN INDEX HANDLER:", tb)
+        sys.stdout.flush()
+        return web.Response(text=f"Startup Error:\n{tb}", status=500)
 
 async def ws_proxy_handler(request):
-    sid = request.query.get("sid") or request.cookies.get("jhora_sid")
-    sess = get_or_create_session(sid)
-    
-    ws_client = web.WebSocketResponse()
-    await ws_client.prepare(request)
+    try:
+        sid = request.query.get("sid") or request.cookies.get("jhora_sid")
+        sess = get_or_create_session(sid)
+        
+        ws_client = web.WebSocketResponse()
+        await ws_client.prepare(request)
 
-    target_url = f"ws://127.0.0.1:{sess['ws_port']}/websockify"
-    
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.ws_connect(target_url) as ws_server:
-                async def client_to_server():
-                    async for msg in ws_client:
-                        if msg.type == WSMsgType.BINARY:
-                            await ws_server.send_bytes(msg.data)
-                        elif msg.type == WSMsgType.TEXT:
-                            await ws_server.send_str(msg.data)
-                        elif msg.type == WSMsgType.CLOSE:
-                            await ws_server.close()
-                            break
+        target_url = f"ws://127.0.0.1:{sess['ws_port']}"
+        
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.ws_connect(target_url) as ws_server:
+                    async def client_to_server():
+                        async for msg in ws_client:
+                            if msg.type == WSMsgType.BINARY:
+                                await ws_server.send_bytes(msg.data)
+                            elif msg.type == WSMsgType.TEXT:
+                                await ws_server.send_str(msg.data)
+                            elif msg.type == WSMsgType.CLOSE:
+                                await ws_server.close()
+                                break
 
-                async def server_to_client():
-                    async for msg in ws_server:
-                        if msg.type == WSMsgType.BINARY:
-                            await ws_client.send_bytes(msg.data)
-                        elif msg.type == WSMsgType.TEXT:
-                            await ws_client.send_str(msg.data)
-                        elif msg.type == WSMsgType.CLOSE:
-                            await ws_client.close()
-                            break
+                    async def server_to_client():
+                        async for msg in ws_server:
+                            if msg.type == WSMsgType.BINARY:
+                                await ws_client.send_bytes(msg.data)
+                            elif msg.type == WSMsgType.TEXT:
+                                await ws_client.send_str(msg.data)
+                            elif msg.type == WSMsgType.CLOSE:
+                                await ws_client.close()
+                                break
 
-                await asyncio.gather(client_to_server(), server_to_client())
-        except Exception as e:
-            print(f"WebSocket proxy error for {sid}: {e}")
+                    await asyncio.gather(client_to_server(), server_to_client())
+            except Exception as e:
+                print(f"WebSocket proxy error for {sid}: {e}")
+                sys.stdout.flush()
 
-    return ws_client
+        return ws_client
+    except Exception as e:
+        print("WS Handler Exception:", e)
+        sys.stdout.flush()
+        return web.Response(status=500)
 
 async def list_charts_handler(request):
     sid = request.query.get("sid") or request.cookies.get("jhora_sid")
@@ -205,6 +200,7 @@ async def upload_chart_handler(request):
                         break
                     f.write(chunk)
             print(f"Uploaded chart {file_name} for session {sid}")
+            sys.stdout.flush()
             return web.json_response({"success": True, "filename": file_name})
     return web.json_response({"success": False, "error": "No file uploaded"})
 
@@ -239,9 +235,6 @@ def create_app():
     app.router.add_get("/api/download", download_chart_handler)
     app.router.add_post("/api/upload", upload_chart_handler)
     app.router.add_static("/static/", STATIC_DIR)
-    # Serve novnc assets directly if needed
-    if os.path.exists("/usr/share/novnc"):
-        app.router.add_static("/novnc/", "/usr/share/novnc")
     return app
 
 if __name__ == "__main__":
@@ -250,4 +243,5 @@ if __name__ == "__main__":
     print("=================================================================")
     print(f"Jagannatha Hora Multi-User Gateway starting on port {PORT}...")
     print("=================================================================")
+    sys.stdout.flush()
     web.run_app(create_app(), host="0.0.0.0", port=PORT)

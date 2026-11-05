@@ -17,3 +17,4 @@ The authentic Windows desktop application authored by P.V.R. Narasimha Rao, runn
 * **Private User Isolation:** Every user receives an independent virtual desktop display and process space.
 * **Seamless Chart Sync:** Save `.jhd` charts inside JHora and download them directly to your device, or drag-and-drop `.jhd` files to open.
 * **Cross-Device:** Works on desktop browsers, iPads, iPhones, and Android devices.
+
