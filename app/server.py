@@ -65,7 +65,7 @@ def get_or_create_session(sid):
 
     # 2. Start x11vnc
     vnc_log = open(os.path.join(user_dir, "x11vnc.log"), "w")
-    x11vnc_cmd = ["x11vnc", "-display", f":{disp}", "-rfbport", str(vnc_p), "-listen", "127.0.0.1", "-forever", "-shared", "-nopw", "-wait", "5", "-defer", "2"]
+    x11vnc_cmd = ["x11vnc", "-display", f":{disp}", "-rfbport", str(vnc_p), "-listen", "127.0.0.1", "-forever", "-shared", "-nopw"]
     p_vnc = subprocess.Popen(x11vnc_cmd, env=env, stdout=vnc_log, stderr=subprocess.STDOUT)
     procs.append(("x11vnc", p_vnc))
     time.sleep(0.5)
@@ -161,9 +161,6 @@ async def ws_proxy_handler(request):
                     await ws_client.send_bytes(data)
             except Exception:
                 pass
-            finally:
-                if not ws_client.closed:
-                    await ws_client.close()
 
         async def client_to_vnc():
             try:
@@ -171,17 +168,26 @@ async def ws_proxy_handler(request):
                     if msg.type == WSMsgType.BINARY:
                         vnc_writer.write(msg.data)
                         await vnc_writer.drain()
-                    elif msg.type == WSMsgType.CLOSE:
+                    elif msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
                         break
             except Exception:
                 pass
-            finally:
-                try:
-                    vnc_writer.close()
-                except Exception:
-                    pass
 
-        await asyncio.gather(vnc_to_client(), client_to_vnc())
+        task_vnc = asyncio.create_task(vnc_to_client())
+        task_ws = asyncio.create_task(client_to_vnc())
+        done, pending = await asyncio.wait([task_vnc, task_ws], return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
+
+        try:
+            vnc_writer.close()
+            await vnc_writer.wait_closed()
+        except Exception:
+            pass
+
+        if not ws_client.closed:
+            await ws_client.close()
+
         return ws_client
     except Exception as e:
         last_ws_error = f"{type(e).__name__}: {str(e)}"
