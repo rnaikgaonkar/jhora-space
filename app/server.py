@@ -2,6 +2,7 @@
 import asyncio
 import os
 import sys
+import re
 import uuid
 import time
 import shutil
@@ -19,22 +20,25 @@ sessions = {}
 next_display = 100
 last_ws_error = "none"
 
+def sanitize_sid(sid):
+    if not sid:
+        return ""
+    return re.sub(r"[^a-zA-Z0-9_\-]", "", str(sid))[:32]
+
 def get_or_create_session(sid):
     global next_display
-    if sid and sid in sessions:
+    sid = sanitize_sid(sid) or str(uuid.uuid4())[:8]
+    if sid in sessions:
         sessions[sid]["last_active"] = time.time()
         return sessions[sid]
 
-    sid = sid or str(uuid.uuid4())[:8]
     disp = next_display
     next_display += 1
     vnc_p = 5900 + disp
 
     user_dir = os.path.join(SESSIONS_DIR, sid)
     charts_dir = os.path.join(user_dir, "charts")
-    wine_prefix = os.path.join(user_dir, "wineprefix")
     os.makedirs(charts_dir, exist_ok=True)
-    os.makedirs(wine_prefix, exist_ok=True)
 
     # Copy template chart files if any
     sample_data = os.path.join(JHORA_DIR, "data")
@@ -47,7 +51,7 @@ def get_or_create_session(sid):
     # Environment for this session
     env = os.environ.copy()
     env["DISPLAY"] = f":{disp}"
-    env["WINEPREFIX"] = wine_prefix
+    env["WINEPREFIX"] = "/root/.wine"
     env["WINEDEBUG"] = "-all"
 
     procs = []
@@ -57,14 +61,14 @@ def get_or_create_session(sid):
     xvfb_cmd = ["Xvfb", f":{disp}", "-screen", "0", "1280x800x24", "-ac", "+extension", "RANDR"]
     p_xvfb = subprocess.Popen(xvfb_cmd, env=env, stdout=xvfb_log, stderr=subprocess.STDOUT)
     procs.append(("xvfb", p_xvfb))
-    time.sleep(0.8)
+    time.sleep(0.5)
 
     # 2. Start x11vnc
     vnc_log = open(os.path.join(user_dir, "x11vnc.log"), "w")
-    x11vnc_cmd = ["x11vnc", "-display", f":{disp}", "-rfbport", str(vnc_p), "-listen", "127.0.0.1", "-forever", "-shared", "-nopw"]
+    x11vnc_cmd = ["x11vnc", "-display", f":{disp}", "-rfbport", str(vnc_p), "-listen", "127.0.0.1", "-forever", "-shared", "-nopw", "-wait", "5", "-defer", "2"]
     p_vnc = subprocess.Popen(x11vnc_cmd, env=env, stdout=vnc_log, stderr=subprocess.STDOUT)
     procs.append(("x11vnc", p_vnc))
-    time.sleep(1.0)
+    time.sleep(0.5)
 
     # 3. Start JHora under Wine
     jhora_log = open(os.path.join(user_dir, "jhora.log"), "w")
@@ -82,25 +86,30 @@ def get_or_create_session(sid):
         "last_active": time.time()
     }
     sessions[sid] = sess
-    print(f"Created isolated session {sid} on DISPLAY :{disp} (VNC {vnc_p})")
+    print(f"Created isolated session {sid} on DISPLAY :{disp} (VNC port {vnc_p})")
     sys.stdout.flush()
     return sess
 
 async def index_handler(request):
     try:
-        sid = request.cookies.get("jhora_sid")
-        if not sid or sid not in sessions:
+        sid = sanitize_sid(request.query.get("sid")) or sanitize_sid(request.cookies.get("jhora_sid"))
+        if not sid:
             sid = str(uuid.uuid4())[:8]
-        
+            raise web.HTTPFound(f"/?sid={sid}")
+
         get_or_create_session(sid)
 
         index_path = os.path.join(STATIC_DIR, "index.html")
         with open(index_path, "r", encoding="utf-8") as f:
             html = f.read()
 
+        html = html.replace("__SESSION_ID__", sid)
+
         response = web.Response(text=html, content_type="text/html")
         response.set_cookie("jhora_sid", sid, max_age=86400 * 30, path="/")
         return response
+    except web.HTTPFound:
+        raise
     except Exception as e:
         tb = traceback.format_exc()
         print("ERROR IN INDEX HANDLER:", tb)
@@ -110,9 +119,25 @@ async def index_handler(request):
 async def ws_proxy_handler(request):
     global last_ws_error
     try:
-        sid = request.query.get("sid") or request.cookies.get("jhora_sid")
+        sid = sanitize_sid(request.query.get("sid")) or sanitize_sid(request.cookies.get("jhora_sid"))
+        if not sid:
+            return web.Response(text="Session ID required", status=400)
+
         sess = get_or_create_session(sid)
-        
+        sess["last_active"] = time.time()
+
+        # Connect to x11vnc TCP port with retries before upgrading WebSocket
+        vnc_reader, vnc_writer = None, None
+        for attempt in range(50):
+            try:
+                vnc_reader, vnc_writer = await asyncio.open_connection("127.0.0.1", sess["vnc_port"])
+                break
+            except (ConnectionRefusedError, OSError):
+                await asyncio.sleep(0.2)
+
+        if not vnc_writer:
+            raise Exception(f"Failed to connect to x11vnc on port {sess['vnc_port']} after 10s")
+
         # Negotiate subprotocol (noVNC requests 'binary')
         requested_protocols = request.headers.get("Sec-WebSocket-Protocol", "").split(",")
         accepted_protocol = None
@@ -124,19 +149,7 @@ async def ws_proxy_handler(request):
         ws_client = web.WebSocketResponse(protocols=[accepted_protocol] if accepted_protocol else None)
         await ws_client.prepare(request)
 
-        # Retry connecting to x11vnc for up to 6 seconds while it finishes initializing
-        vnc_reader, vnc_writer = None, None
-        for attempt in range(30):
-            try:
-                vnc_reader, vnc_writer = await asyncio.open_connection("127.0.0.1", sess["vnc_port"])
-                break
-            except (ConnectionRefusedError, OSError):
-                await asyncio.sleep(0.2)
-
-        if not vnc_writer:
-            raise Exception(f"Failed to connect to x11vnc on port {sess['vnc_port']} after 6 seconds")
-
-        print(f"Connected to x11vnc TCP port {sess['vnc_port']} for session {sid}")
+        print(f"WS tunnel active to x11vnc port {sess['vnc_port']} for session {sid}")
         sys.stdout.flush()
 
         async def vnc_to_client():
@@ -163,7 +176,10 @@ async def ws_proxy_handler(request):
             except Exception:
                 pass
             finally:
-                vnc_writer.close()
+                try:
+                    vnc_writer.close()
+                except Exception:
+                    pass
 
         await asyncio.gather(vnc_to_client(), client_to_vnc())
         return ws_client
@@ -174,8 +190,21 @@ async def ws_proxy_handler(request):
         return web.Response(status=500)
 
 async def debug_handler(request):
-    sid = request.query.get("sid") or request.cookies.get("jhora_sid")
-    sess = get_or_create_session(sid)
+    sid = sanitize_sid(request.query.get("sid")) or sanitize_sid(request.cookies.get("jhora_sid"))
+    if not sid:
+        return web.json_response({
+            "active_sessions": list(sessions.keys()),
+            "session_count": len(sessions),
+            "last_ws_error": last_ws_error
+        })
+
+    if sid not in sessions:
+        return web.json_response({
+            "error": f"Session {sid} not found",
+            "active_sessions": list(sessions.keys())
+        })
+
+    sess = sessions[sid]
     status_data = {"sid": sid, "last_ws_error": last_ws_error, "processes": {}, "logs": {}}
     for name, p in sess["procs"]:
         code = p.poll()
@@ -187,8 +216,10 @@ async def debug_handler(request):
     return web.json_response(status_data)
 
 async def list_charts_handler(request):
-    sid = request.query.get("sid") or request.cookies.get("jhora_sid")
-    sess = get_or_create_session(sid)
+    sid = sanitize_sid(request.query.get("sid")) or sanitize_sid(request.cookies.get("jhora_sid"))
+    if not sid or sid not in sessions:
+        return web.json_response({"charts": []})
+    sess = sessions[sid]
     charts = []
     if os.path.exists(sess["charts_dir"]):
         for f in os.listdir(sess["charts_dir"]):
@@ -202,9 +233,11 @@ async def list_charts_handler(request):
     return web.json_response({"charts": charts})
 
 async def download_chart_handler(request):
-    sid = request.query.get("sid") or request.cookies.get("jhora_sid")
+    sid = sanitize_sid(request.query.get("sid")) or sanitize_sid(request.cookies.get("jhora_sid"))
     file_name = request.query.get("file")
-    sess = get_or_create_session(sid)
+    if not sid or sid not in sessions or not file_name:
+        return web.Response(status=404, text="Chart not found")
+    sess = sessions[sid]
     file_path = os.path.join(sess["charts_dir"], os.path.basename(file_name))
     if os.path.exists(file_path):
         return web.FileResponse(file_path, headers={
@@ -213,7 +246,9 @@ async def download_chart_handler(request):
     return web.Response(status=404, text="Chart not found")
 
 async def upload_chart_handler(request):
-    sid = request.query.get("sid") or request.cookies.get("jhora_sid")
+    sid = sanitize_sid(request.query.get("sid")) or sanitize_sid(request.cookies.get("jhora_sid"))
+    if not sid:
+        return web.json_response({"success": False, "error": "No session ID"})
     sess = get_or_create_session(sid)
     reader = await request.multipart()
     while True:
