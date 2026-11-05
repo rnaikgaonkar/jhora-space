@@ -53,28 +53,32 @@ def get_or_create_session(sid):
 
     procs = []
 
-    # 1. Start Xvfb (Virtual Framebuffer Display)
+    # 1. Start Xvfb
+    xvfb_log = open(os.path.join(user_dir, "xvfb.log"), "w")
     xvfb_cmd = ["Xvfb", f":{disp}", "-screen", "0", "1280x800x24", "-ac", "+extension", "RANDR"]
-    p_xvfb = subprocess.Popen(xvfb_cmd, env=env)
-    procs.append(p_xvfb)
-    time.sleep(0.5)
+    p_xvfb = subprocess.Popen(xvfb_cmd, env=env, stdout=xvfb_log, stderr=subprocess.STDOUT)
+    procs.append(("xvfb", p_xvfb))
+    time.sleep(0.8)
 
     # 2. Start x11vnc
-    x11vnc_cmd = ["x11vnc", "-display", f":{disp}", "-rfbport", str(vnc_p), "-forever", "-shared", "-nopw", "-quiet"]
-    p_vnc = subprocess.Popen(x11vnc_cmd, env=env)
-    procs.append(p_vnc)
-    time.sleep(0.3)
+    vnc_log = open(os.path.join(user_dir, "x11vnc.log"), "w")
+    x11vnc_cmd = ["x11vnc", "-display", f":{disp}", "-rfbport", str(vnc_p), "-forever", "-shared", "-nopw"]
+    p_vnc = subprocess.Popen(x11vnc_cmd, env=env, stdout=vnc_log, stderr=subprocess.STDOUT)
+    procs.append(("x11vnc", p_vnc))
+    time.sleep(0.5)
 
-    # 3. Start websockify for this session
+    # 3. Start websockify
+    ws_log = open(os.path.join(user_dir, "websockify.log"), "w")
     websockify_cmd = ["websockify", str(ws_p), f"127.0.0.1:{vnc_p}"]
-    p_ws = subprocess.Popen(websockify_cmd)
-    procs.append(p_ws)
-    time.sleep(0.3)
+    p_ws = subprocess.Popen(websockify_cmd, stdout=ws_log, stderr=subprocess.STDOUT)
+    procs.append(("websockify", p_ws))
+    time.sleep(0.5)
 
     # 4. Start JHora under Wine
+    jhora_log = open(os.path.join(user_dir, "jhora.log"), "w")
     jhora_exe = os.path.join(JHORA_DIR, "jhora.exe")
-    p_jhora = subprocess.Popen(["wine", jhora_exe], cwd=JHORA_DIR, env=env)
-    procs.append(p_jhora)
+    p_jhora = subprocess.Popen(["wine", jhora_exe], cwd=JHORA_DIR, env=env, stdout=jhora_log, stderr=subprocess.STDOUT)
+    procs.append(("jhora", p_jhora))
 
     sess = {
         "sid": sid,
@@ -117,38 +121,49 @@ async def ws_proxy_handler(request):
         sid = request.query.get("sid") or request.cookies.get("jhora_sid")
         sess = get_or_create_session(sid)
         
-        ws_client = web.WebSocketResponse()
+        # Accept binary/base64 protocols used by noVNC RFB client
+        requested_protocols = request.headers.get("Sec-WebSocket-Protocol", "").split(",")
+        accepted_protocol = None
+        for proto in [p.strip() for p in requested_protocols]:
+            if proto in ["binary", "base64"]:
+                accepted_protocol = proto
+                break
+
+        ws_client = web.WebSocketResponse(protocols=[accepted_protocol] if accepted_protocol else None)
         await ws_client.prepare(request)
 
         target_url = f"ws://127.0.0.1:{sess['ws_port']}"
         
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.ws_connect(target_url) as ws_server:
-                    async def client_to_server():
-                        async for msg in ws_client:
-                            if msg.type == WSMsgType.BINARY:
-                                await ws_server.send_bytes(msg.data)
-                            elif msg.type == WSMsgType.TEXT:
-                                await ws_server.send_str(msg.data)
-                            elif msg.type == WSMsgType.CLOSE:
-                                await ws_server.close()
-                                break
+        client_session = aiohttp.ClientSession()
+        try:
+            ws_server = await client_session.ws_connect(target_url, protocols=['binary', 'base64'])
+            
+            async def client_to_server():
+                async for msg in ws_client:
+                    if msg.type == WSMsgType.BINARY:
+                        await ws_server.send_bytes(msg.data)
+                    elif msg.type == WSMsgType.TEXT:
+                        await ws_server.send_str(msg.data)
+                    elif msg.type == WSMsgType.CLOSE:
+                        await ws_server.close()
+                        break
 
-                    async def server_to_client():
-                        async for msg in ws_server:
-                            if msg.type == WSMsgType.BINARY:
-                                await ws_client.send_bytes(msg.data)
-                            elif msg.type == WSMsgType.TEXT:
-                                await ws_client.send_str(msg.data)
-                            elif msg.type == WSMsgType.CLOSE:
-                                await ws_client.close()
-                                break
+            async def server_to_client():
+                async for msg in ws_server:
+                    if msg.type == WSMsgType.BINARY:
+                        await ws_client.send_bytes(msg.data)
+                    elif msg.type == WSMsgType.TEXT:
+                        await ws_client.send_str(msg.data)
+                    elif msg.type == WSMsgType.CLOSE:
+                        await ws_client.close()
+                        break
 
-                    await asyncio.gather(client_to_server(), server_to_client())
-            except Exception as e:
-                print(f"WebSocket proxy error for {sid}: {e}")
-                sys.stdout.flush()
+            await asyncio.gather(client_to_server(), server_to_client())
+        except Exception as e:
+            print(f"WebSocket proxy error for {sid}: {e}")
+            sys.stdout.flush()
+        finally:
+            await client_session.close()
 
         return ws_client
     except Exception as e:
@@ -211,7 +226,7 @@ def cleanup_idle_sessions():
         # Clean up if idle for over 45 minutes
         if now - sess["last_active"] > 2700:
             print(f"Cleaning up idle session: {sid}")
-            for p in sess["procs"]:
+            for name, p in sess["procs"]:
                 try:
                     p.terminate()
                 except Exception:
@@ -226,11 +241,25 @@ async def background_reaper(app):
 async def on_startup(app):
     asyncio.create_task(background_reaper(app))
 
+async def debug_handler(request):
+    sid = request.query.get("sid") or request.cookies.get("jhora_sid")
+    sess = get_or_create_session(sid)
+    status_data = {"sid": sid, "processes": {}, "logs": {}}
+    for name, p in sess["procs"]:
+        code = p.poll()
+        status_data["processes"][name] = {"pid": p.pid, "returncode": code, "running": code is None}
+        log_path = os.path.join(sess["user_dir"], f"{name}.log")
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                status_data["logs"][name] = f.read()[-1000:]
+    return web.json_response(status_data)
+
 def create_app():
     app = web.Application()
     app.on_startup.append(on_startup)
     app.router.add_get("/", index_handler)
     app.router.add_get("/ws", ws_proxy_handler)
+    app.router.add_get("/api/debug", debug_handler)
     app.router.add_get("/api/charts", list_charts_handler)
     app.router.add_get("/api/download", download_chart_handler)
     app.router.add_post("/api/upload", upload_chart_handler)

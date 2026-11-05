@@ -261,17 +261,28 @@
       rfb.clipViewport = true;
 
       rfb.addEventListener('connect', () => {
+        console.log('RFB Connected successfully!');
         document.getElementById('loading-overlay').style.opacity = '0';
         setTimeout(() => {
           document.getElementById('loading-overlay').style.display = 'none';
         }, 300);
       });
 
-      rfb.addEventListener('disconnect', (e) => {
+      rfb.addEventListener('disconnect', async (e) => {
+        console.error('RFB Disconnected:', e.detail);
         document.getElementById('loading-overlay').style.display = 'flex';
         document.getElementById('loading-overlay').style.opacity = '1';
-        document.getElementById('loading-text').innerText = 'Session disconnected. Reconnecting in 3s...';
-        setTimeout(connect, 3000);
+        
+        // Fetch debug info
+        let debugText = '';
+        try {
+          const res = await fetch('/api/debug');
+          const data = await res.json();
+          debugText = '<br><span style="font-size:12px;color:#f87171">Diagnostics: ' + JSON.stringify(data.processes) + '</span>';
+        } catch(err) {}
+
+        document.getElementById('loading-text').innerHTML = 'Session connecting / recovering...' + debugText;
+        setTimeout(connect, 2000);
       });
     }
 
