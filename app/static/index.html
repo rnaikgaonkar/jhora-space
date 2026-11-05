@@ -215,6 +215,7 @@
       <span class="badge" id="session-badge">Private Session</span>
     </div>
     <div class="actions">
+      <button onclick="sendKeyF2()" title="Open Birth Data & City Atlas Search (F2)" style="background: #1e3a8a; border-color: #3b82f6; color: #93c5fd;">🌐 Birth Data (F2)</button>
       <label class="btn" for="file-input">📤 Upload .JHD</label>
       <input type="file" id="file-input" accept=".jhd,.jh" style="display:none" onchange="handleFileUpload(this.files[0])">
       <button onclick="openChartsModal()">📥 Download Saved Charts</button>
@@ -277,6 +278,14 @@
         rfb.scaleViewport = true;
         rfb.resizeSession = false;
         rfb.clipViewport = true;
+        window.rfb = rfb;
+
+        window.sendKeyF2 = function() {
+          if (rfb) {
+            rfb.sendKey(0xffbf, 'F2', 1);
+            setTimeout(() => rfb.sendKey(0xffbf, 'F2', 0), 100);
+          }
+        };
 
         rfb.addEventListener('connect', () => {
           console.log('RFB Connected successfully!');

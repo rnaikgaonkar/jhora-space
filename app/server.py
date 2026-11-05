@@ -27,6 +27,23 @@ def sanitize_sid(sid):
     return re.sub(r"[^a-zA-Z0-9_\-]", "", str(sid))[:32]
 
 def ensure_wine_configured():
+    # 1. Fallback links at /app level so any parent-stripping resolves jhcore perfectly
+    for sub in ["jhcore", "data", "jhora.ini"]:
+        target = os.path.join(BASE_DIR, sub)
+        src = os.path.join(JHORA_DIR, sub)
+        if not os.path.exists(target) and os.path.exists(src):
+            try:
+                os.symlink(src, target)
+            except Exception:
+                try:
+                    if os.path.isdir(src):
+                        shutil.copytree(src, target, symlinks=True, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(src, target)
+                except Exception:
+                    pass
+
+    # 2. Windows drive_c Program Files setup
     wine_c = "/root/.wine/drive_c"
     prog_files = os.path.join(wine_c, "Program Files (x86)")
     jhora_dest = os.path.join(prog_files, "Jagannatha Hora")
@@ -40,14 +57,20 @@ def ensure_wine_configured():
     except Exception as e:
         print("ensure_wine_configured prog_files note:", e)
 
-    # Seed diamond chart preferences to Wine AppData paths
+    # 3. Seed diamond chart preferences to all known Wine AppData / VirtualStore paths
     appdata_dirs = [
         os.path.join(wine_c, "users", "root", "AppData", "Local", "JagannathaHora"),
         os.path.join(wine_c, "users", "root", "AppData", "Local", "JagannathaHora", "jhcore"),
         os.path.join(wine_c, "users", "root", "Local Settings", "Application Data", "JagannathaHora"),
-        os.path.join(wine_c, "users", "root", "Local Settings", "Application Data", "JagannathaHora", "jhcore")
+        os.path.join(wine_c, "users", "root", "Local Settings", "Application Data", "JagannathaHora", "jhcore"),
+        os.path.join(wine_c, "users", "root", "AppData", "Local", "VirtualStore", "Program Files (x86)", "Jagannatha Hora"),
+        os.path.join(wine_c, "users", "root", "AppData", "Local", "VirtualStore", "Program Files (x86)", "Jagannatha Hora", "jhcore"),
+        os.path.join(wine_c, "users", "root", "Local Settings", "Application Data", "VirtualStore", "Program Files (x86)", "Jagannatha Hora"),
+        os.path.join(wine_c, "users", "root", "Local Settings", "Application Data", "VirtualStore", "Program Files (x86)", "Jagannatha Hora", "jhcore")
     ]
-    src_ini = os.path.join(JHORA_DIR, "jhora.ini")
+    src_ini = os.path.join(JHORA_DIR, "jhcore", "jhora.ini")
+    if not os.path.exists(src_ini):
+        src_ini = os.path.join(JHORA_DIR, "jhora.ini")
     for d in appdata_dirs:
         try:
             os.makedirs(d, exist_ok=True)
@@ -104,8 +127,14 @@ def get_or_create_session(sid):
     # 3. Start JHora under Wine
     ensure_wine_configured()
     jhora_log = open(os.path.join(user_dir, "jhora.log"), "w")
-    jhora_exe = os.path.join(JHORA_DIR, "jhora.exe")
-    p_jhora = subprocess.Popen(["wine", jhora_exe], cwd=JHORA_DIR, env=env, stdout=jhora_log, stderr=subprocess.STDOUT)
+    bin_exe = os.path.join(JHORA_DIR, "bin", "jhora.exe")
+    if os.path.exists(bin_exe):
+        jhora_exe = bin_exe
+        jhora_cwd = os.path.join(JHORA_DIR, "bin")
+    else:
+        jhora_exe = os.path.join(JHORA_DIR, "jhora.exe")
+        jhora_cwd = JHORA_DIR
+    p_jhora = subprocess.Popen(["wine", jhora_exe], cwd=jhora_cwd, env=env, stdout=jhora_log, stderr=subprocess.STDOUT)
     procs.append(("jhora", p_jhora))
 
     sess = {
