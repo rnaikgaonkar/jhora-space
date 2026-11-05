@@ -7,6 +7,7 @@ ENV WINEARCH=win32
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
+        wine \
         wine32 \
         xvfb \
         x11vnc \
