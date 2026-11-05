@@ -32,6 +32,8 @@ WORKDIR /app
 
 COPY app /app
 
+RUN ln -s /app/jhora/jhcore /app/jhcore && ln -s /app/jhora/data /app/data
+
 EXPOSE 7860
 
 CMD ["python3", "/app/server.py"]
