@@ -6,6 +6,7 @@ import re
 import uuid
 import time
 import shutil
+import threading
 import subprocess
 import traceback
 from aiohttp import web, WSMsgType
@@ -309,9 +310,20 @@ def create_app():
     app.router.add_static("/static/", STATIC_DIR)
     return app
 
+def prewarm_wine():
+    try:
+        print("Pre-warming Wine prefix in background...")
+        sys.stdout.flush()
+        subprocess.run(["wineboot", "-i"], timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print("Wine prefix ready!")
+        sys.stdout.flush()
+    except Exception as e:
+        print("Pre-warm note:", e)
+
 if __name__ == "__main__":
     os.makedirs(SESSIONS_DIR, exist_ok=True)
     os.makedirs(STATIC_DIR, exist_ok=True)
+    threading.Thread(target=prewarm_wine, daemon=True).start()
     print("=================================================================")
     print(f"Jagannatha Hora Multi-User Gateway starting on port {PORT}...")
     print("=================================================================")
