@@ -1,0 +1,67 @@
+:Base JHora.hlp>main
+:Title Jagannatha Hora Help
+1 Getting More Help=ID_INTRO_HELP
+1 Vedic Astrology Lessons
+2 Vedic Astrology Textbooks=ID_LESSONS_BOOKS>lessons
+2 What is Vedic astrology
+3 About astrology=ID_LESSONS_WHAT_ASTROLOGY>lessons
+3 About Vedic astrology=ID_LESSONS_WHAT_VEDIC>lessons
+3 Quick overview=ID_LESSONS_OVERVIEW>lessons
+2 Building Blocks of Chart Analysis
+3 Rasis (signs)=ID_LESSONS_RASIS>lessons
+3 Grahas (planets)=ID_LESSONS_GRAHAS>lessons
+3 Visesha Lagnas (special ascendants)=ID_LESSONS_SPL_LAGNAS>lessons
+3 Upagrahas (sub-planets)=ID_LESSONS_UPAGRAHAS>lessons
+3 Vargas (divisional charts)=ID_LESSONS_VARGAS>lessons
+3 Bhavas (houses)=ID_LESSONS_HOUSES>lessons
+3 Karakas (significators)=ID_LESSONS_KARAKAS>lessons
+3 Arudhas (risen ones)=ID_LESSONS_ARUDHAS>lessons
+3 Drishti (aspects)=ID_LESSONS_DRISHTI>lessons
+3 Argala (intervention)=ID_LESSONS_ARGALA>lessons
+3 Yogas (special combinations)=ID_LESSONS_YOGAS>lessons
+3 Ashtakavarga (eight-sourced strengths)=ID_LESSONS_ASHTAKAVARGA>lessons
+3 Other strengths=ID_LESSONS_STRENGTHS>lessons
+3 Sahamas (significant points)=ID_LESSONS_SAHAMAS>lessons
+3 Miscellaneous topics=ID_LESSONS_MISCELLANY>lessons
+2 Timing with Dasa Systems
+3 Vimsottari dasa=ID_LESSONS_VIMSOTTARI>lessons
+3 Ashtottari dasa=ID_LESSONS_ASHTOTTARI>lessons
+3 Kalachakra dasa=ID_LESSONS_KALACHAKRA>lessons
+3 Narayana dasa=ID_LESSONS_NARAYANA>lessons
+3 Lagna Kendradi Rasi dasa=ID_LESSONS_LKR_DASA>lessons
+3 Sudasa=ID_LESSONS_SUDASA>lessons
+3 Drigdasa=ID_LESSONS_DRIGDASA>lessons
+3 Niryana Shoola dasa=ID_LESSONS_NIRYANA_SHOOLA>lessons
+3 Shoola dasa=ID_LESSONS_SHOOLA>lessons
+3 Sudarsana dasa=ID_LESSONS_SUDARSANA>lessons
+3 Moola dasa=ID_LESSONS_MOOLA>lessons
+2 Timing with Transits
+3 Transits and natal references=ID_LESSONS_TRANSITS_NATAL_REF>lessons
+3 Transits and ashtakavargas=ID_LESSONS_TRANSITS_AV>lessons
+3 Other transit techniques=ID_LESSONS_TRANSITS_OTHER>lessons
+2 Tajaka Solar Return Charts
+3 Annual and other charts=ID_LESSONS_TAJAKA_ANNUAL>lessons
+3 Judgment of charts=ID_LESSONS_TAJAKA_BASIC>lessons
+3 Compressed dasas=ID_LESSONS_TAJAKA_DASAS>lessons
+2 Miscellaneous Topics
+3 Impact of birthtime error=ID_LESSONS_MISC_BIRTHTIME_ERROR>lessons
+3 Mundane astrology=ID_LESSONS_MISC_MUNDANE>lessons
+3 Prasna (horary astrology)=ID_LESSONS_MISC_PRASNA>lessons
+3 Progressions (taught by Manu)=ID_LESSONS_MISC_PROGRESSIONS>lessons
+1 Getting Started with Jagannatha Hora
+2 Finding your way=ID_INTRO_BASICS>intro
+2 Pop-up menus=ID_INTRO_POPUP_MENUS>intro
+1 Reference Manual
+2 Working with charts=ID_DETAILS_CHARTS>detailed
+2 Basic calculations=ID_DETAILS_BASIC>detailed
+2 Planetary strengths=ID_DETAILS_STRENGTHS>detailed
+2 Dasa calculations=ID_DETAILS_DASAS>detailed
+2 Transit calculations=ID_DETAILS_TRANSITS>detailed
+2 Tajaka calculations=ID_DETAILS_TAJAKA>detailed
+2 Tithi Pravesha=ID_DETAILS_TP>detailed
+2 Mundane calculations=ID_DETAILS_MUNDANE>detailed
+2 Miscellany view=ID_DETAILS_MISC>detailed
+2 Viewing special chakras=ID_DETAILS_CHAKRAS>detailed
+2 Main menu=ID_DETAILS_MAIN>detailed
+2 Preferences menu=ID_DETAILS_PREF>detailed
+2 Frequently Asked Questions (FAQ)=ID_DETAILS_FAQ>detailed

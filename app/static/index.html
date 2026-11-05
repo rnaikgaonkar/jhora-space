@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Jagannatha Hora — Cloud Edition</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <script src="https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js" type="module"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    body {
+      background-color: #0b0f19;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    header {
+      background: #111827;
+      border-bottom: 1px solid #1f2937;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 48px;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #f59e0b;
+      letter-spacing: 0.3px;
+    }
+    .badge {
+      background: #1e293b;
+      color: #38bdf8;
+      border: 1px solid #334155;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 9999px;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    button, label.btn {
+      background: #1e293b;
+      color: #e2e8f0;
+      border: 1px solid #334155;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    button:hover, label.btn:hover {
+      background: #334155;
+      color: #fff;
+      border-color: #475569;
+    }
+    button.primary {
+      background: #d97706;
+      border-color: #f59e0b;
+      color: #fff;
+    }
+    button.primary:hover {
+      background: #b45309;
+    }
+    #vnc-container {
+      flex: 1;
+      width: 100%;
+      height: calc(100vh - 48px);
+      position: relative;
+      background: #030712;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #screen {
+      width: 100%;
+      height: 100%;
+    }
+    #screen canvas {
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.9);
+    }
+    #loading-overlay {
+      position: absolute;
+      inset: 0;
+      background: #090d16;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      transition: opacity 0.3s ease;
+    }
+    .spinner {
+      width: 42px;
+      height: 42px;
+      border: 3px solid #1e293b;
+      border-top-color: #f59e0b;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 16px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    #loading-text {
+      font-size: 14px;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+    /* Charts Modal */
+    #charts-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-card {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 10px;
+      width: 480px;
+      max-width: 90vw;
+      padding: 20px;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8);
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      border-bottom: 1px solid #1f2937;
+      padding-bottom: 10px;
+    }
+    .modal-header h2 {
+      font-size: 16px;
+      color: #f59e0b;
+    }
+    .modal-header .close-btn {
+      background: none;
+      border: none;
+      font-size: 18px;
+      color: #94a3b8;
+      cursor: pointer;
+    }
+    .chart-list {
+      max-height: 280px;
+      overflow-y: auto;
+      list-style: none;
+    }
+    .chart-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: #1e293b;
+      border-radius: 6px;
+      margin-bottom: 6px;
+    }
+    .chart-name {
+      font-size: 13px;
+      color: #e2e8f0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 280px;
+    }
+    .dropzone-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(245, 158, 11, 0.2);
+      border: 4px dashed #f59e0b;
+      z-index: 999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: 700;
+      color: #f59e0b;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="dropzone" class="dropzone-overlay">Drop .jhd Chart File to Upload & Open</div>
+
+  <header>
+    <div class="brand">
+      <h1>☸ Jagannatha Hora</h1>
+      <span class="badge" id="session-badge">Private Session</span>
+    </div>
+    <div class="actions">
+      <label class="btn" for="file-input">📤 Upload .JHD</label>
+      <input type="file" id="file-input" accept=".jhd,.jh" style="display:none" onchange="handleFileUpload(this.files[0])">
+      <button onclick="openChartsModal()">📥 Download Saved Charts</button>
+      <button class="primary" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+    </div>
+  </header>
+
+  <div id="vnc-container">
+    <div id="loading-overlay">
+      <div class="spinner"></div>
+      <div id="loading-text">Connecting to private Jagannatha Hora session...</div>
+    </div>
+    <div id="screen"></div>
+  </div>
+
+  <div id="charts-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>Your Saved Charts</h2>
+        <button class="close-btn" onclick="closeChartsModal()">&times;</button>
+      </div>
+      <ul class="chart-list" id="chart-list-container">
+        <li style="color: #64748b; font-size: 13px; text-align: center; padding: 20px;">Loading charts...</li>
+      </ul>
+    </div>
+  </div>
+
+  <script type="module">
+    import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js';
+
+    let rfb;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+    function connect() {
+      const screen = document.getElementById('screen');
+      rfb = new RFB(screen, wsUrl, {
+        wsProtocols: ['binary', 'base64']
+      });
+
+      rfb.scaleViewport = true;
+      rfb.resizeSession = false;
+      rfb.clipViewport = true;
+
+      rfb.addEventListener('connect', () => {
+        document.getElementById('loading-overlay').style.opacity = '0';
+        setTimeout(() => {
+          document.getElementById('loading-overlay').style.display = 'none';
+        }, 300);
+      });
+
+      rfb.addEventListener('disconnect', (e) => {
+        document.getElementById('loading-overlay').style.display = 'flex';
+        document.getElementById('loading-overlay').style.opacity = '1';
+        document.getElementById('loading-text').innerText = 'Session disconnected. Reconnecting in 3s...';
+        setTimeout(connect, 3000);
+      });
+    }
+
+    connect();
+
+    // Drag and drop .jhd files
+    window.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      document.getElementById('dropzone').style.display = 'flex';
+    });
+    window.addEventListener('dragleave', (e) => {
+      if (e.clientX <= 0 || e.clientY <= 0) {
+        document.getElementById('dropzone').style.display = 'none';
+      }
+    });
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      document.getElementById('dropzone').style.display = 'none';
+      if (e.dataTransfer.files.length > 0) {
+        window.handleFileUpload(e.dataTransfer.files[0]);
+      }
+    });
+
+    window.handleFileUpload = async function(file) {
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('chart', file);
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert('Chart "' + data.filename + '" uploaded! Open it in JHora by pressing F2 or going to File -> Open.');
+        } else {
+          alert('Upload failed: ' + data.error);
+        }
+      } catch (err) {
+        alert('Upload error: ' + err.message);
+      }
+    };
+
+    window.openChartsModal = async function() {
+      const modal = document.getElementById('charts-modal');
+      const container = document.getElementById('chart-list-container');
+      modal.style.display = 'flex';
+      container.innerHTML = '<li style="color: #64748b; font-size: 13px; text-align: center; padding: 20px;">Fetching charts...</li>';
+      try {
+        const res = await fetch('/api/charts');
+        const data = await res.json();
+        if (data.charts && data.charts.length > 0) {
+          container.innerHTML = data.charts.map(c => `
+            <li class="chart-item">
+              <span class="chart-name">${c.name}</span>
+              <a href="/api/download?file=${encodeURIComponent(c.name)}" download="${c.name}" style="background: #0284c7; color: #fff; padding: 4px 10px; border-radius: 4px; text-decoration: none; font-size: 11px; font-weight: 700;">Download</a>
+            </li>
+          `).join('');
+        } else {
+          container.innerHTML = '<li style="color: #64748b; font-size: 13px; text-align: center; padding: 20px;">No charts saved yet. Use File -> Save Chart inside JHora first!</li>';
+        }
+      } catch (err) {
+        container.innerHTML = '<li style="color: #ef4444; font-size: 13px; text-align: center; padding: 20px;">Error loading charts</li>';
+      }
+    };
+
+    window.closeChartsModal = function() {
+      document.getElementById('charts-modal').style.display = 'none';
+    };
+
+    window.toggleFullscreen = function() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(console.error);
+      } else {
+        document.exitFullscreen().catch(console.error);
+      }
+    };
+  </script>
+</body>
+</html>
