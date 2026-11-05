@@ -59,12 +59,12 @@ def get_or_create_session(sid):
     procs.append(("xvfb", p_xvfb))
     time.sleep(0.8)
 
-    # 2. Start x11vnc with copyrect pixel caching
+    # 2. Start x11vnc
     vnc_log = open(os.path.join(user_dir, "x11vnc.log"), "w")
-    x11vnc_cmd = ["x11vnc", "-display", f":{disp}", "-rfbport", str(vnc_p), "-forever", "-shared", "-nopw", "-ncache", "10", "-quiet"]
+    x11vnc_cmd = ["x11vnc", "-display", f":{disp}", "-rfbport", str(vnc_p), "-listen", "127.0.0.1", "-forever", "-shared", "-nopw"]
     p_vnc = subprocess.Popen(x11vnc_cmd, env=env, stdout=vnc_log, stderr=subprocess.STDOUT)
     procs.append(("x11vnc", p_vnc))
-    time.sleep(0.5)
+    time.sleep(1.0)
 
     # 3. Start JHora under Wine
     jhora_log = open(os.path.join(user_dir, "jhora.log"), "w")
@@ -124,8 +124,18 @@ async def ws_proxy_handler(request):
         ws_client = web.WebSocketResponse(protocols=[accepted_protocol] if accepted_protocol else None)
         await ws_client.prepare(request)
 
-        # Direct TCP connection to x11vnc
-        vnc_reader, vnc_writer = await asyncio.open_connection("127.0.0.1", sess["vnc_port"])
+        # Retry connecting to x11vnc for up to 6 seconds while it finishes initializing
+        vnc_reader, vnc_writer = None, None
+        for attempt in range(30):
+            try:
+                vnc_reader, vnc_writer = await asyncio.open_connection("127.0.0.1", sess["vnc_port"])
+                break
+            except (ConnectionRefusedError, OSError):
+                await asyncio.sleep(0.2)
+
+        if not vnc_writer:
+            raise Exception(f"Failed to connect to x11vnc on port {sess['vnc_port']} after 6 seconds")
+
         print(f"Connected to x11vnc TCP port {sess['vnc_port']} for session {sid}")
         sys.stdout.flush()
 
